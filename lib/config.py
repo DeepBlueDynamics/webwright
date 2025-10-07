@@ -264,9 +264,10 @@ class Config:
 
         openai_token = self.get_openai_api_key()
         anthropic_token = self.get_anthropic_api_key()
-        
+
         openai_model = self.get_config_value("config", "OPENAI_MODEL")
         anthropic_model = self.get_config_value("config", "ANTHROPIC_MODEL")
+        ollama_model = self.get_config_value("config", "OLLAMA_MODEL")
 
         available_apis = []
 
@@ -282,18 +283,38 @@ class Config:
             if anthropic_model:
                 available_apis.append(("anthropic", f"Anthropic ({anthropic_model})"))
 
+        # Detect Ollama availability (local default or configured endpoint)
+        ollama_endpoint = os.getenv("OLLAMA_API_ENDPOINT") or self.get_config_value("config", "OLLAMA_API_ENDPOINT")
+        if ollama_endpoint == "NONE":
+            ollama_endpoint = None
+
+        if ollama_endpoint:
+            if not ollama_model or ollama_model in ("", "NONE", None):
+                ollama_model = "llama3"
+            available_apis.append(("ollama", f"Ollama ({ollama_model})"))
+        elif not available_apis:
+            # No remote APIs configured; fall back to attempting local Ollama
+            try:
+                ollama_endpoint = self.get_ollama_endpoint()
+                if ollama_endpoint:
+                    if not ollama_model or ollama_model in ("", "NONE", None):
+                        ollama_model = "llama3"
+                    available_apis.append(("ollama", f"Ollama ({ollama_model})"))
+            except Exception as e:
+                logger.error(f"Unable to configure Ollama endpoint: {e}")
+
         if not available_apis:
-            logger.error("Error: Neither OpenAI nor Anthropic API is available.")
+            logger.error("Error: No AI providers are available.")
             try:
                 should_exit = yes_no_dialog(
                     title="Exit Program",
-                    text="Can't proceed without valid API configurations. Edit your ~/.webwright/webwright_config file to set the API key(s). Exit program?"
+                    text="Can't proceed without valid AI provider configurations. Edit your ~/.webwright/webwright_config file to set the API configuration(s). Exit program?"
                 ).run()
                 if should_exit:
                     return None, None, None, None
                 else:
                     return self.determine_api_to_use()
-            except RuntimeError as e:
+            except RuntimeError:
                 return None, None, None, None
 
         if len(available_apis) == 1:
@@ -305,21 +326,28 @@ class Config:
         else:
             choice = radiolist_dialog(
                 title="Choose API",
-                text="Multiple APIs are available. Which one would you like to use?",
+                text="Multiple AI providers are available. Which one would you like to use?",
                 values=available_apis
             ).run()
-            
+
             if choice is None:
-                logger.info("API selection cancelled. Exiting program.")
+                logger.info("AI provider selection cancelled. Exiting program.")
                 return None, None, None, None
-            
+
         self.set_config_value("config", "PREFERRED_API", str(choice))
+
         if choice == "openai":
             logger.info(f"Using OpenAI API with model {openai_model}")
             return choice, openai_token, None, openai_model
-        else:
+        if choice == "anthropic":
             logger.info(f"Using Anthropic API with model {anthropic_model}")
             return choice, None, anthropic_token, anthropic_model
+
+        # Ollama selected
+        self.set_config_value("config", "OLLAMA_API_ENDPOINT", ollama_endpoint)
+        self.set_config_value("config", "OLLAMA_MODEL", ollama_model)
+        logger.info(f"Using Ollama with model {ollama_model} @ {ollama_endpoint}")
+        return choice, None, None, ollama_model
 
     def select_openai_model(self, api_key):
         if not api_key or api_key == "NONE":

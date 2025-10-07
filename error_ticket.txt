@@ -1,0 +1,3 @@
+"Error encountered in directory: C:\Users\kord\Code\gnosis\webwright" 
+"Timestamp: $(date)" 
+"Please review the logs for more details." 

@@ -3,7 +3,6 @@ from openai import AsyncOpenAI
 
 # Anthropic imports
 from anthropic import AsyncAnthropic
-from anthropic.types import TextBlock, ToolUseBlock
 
 # Aiohttp import for Ollama API
 import aiohttp
@@ -255,14 +254,18 @@ class llm_wrapper:
             function_calls = []
 
             for block in response.content:
-                if isinstance(block, TextBlock):
+                if hasattr(block, 'type'):
+                    if block.type == 'text':
+                        content += block.text
+                    elif block.type == 'tool_use':
+                        function_calls.append({
+                            "id": block.id,
+                            "name": block.name,
+                            "arguments": block.input
+                        })
+                elif hasattr(block, 'text'):
+                    # Fallback for older API format
                     content += block.text
-                elif isinstance(block, ToolUseBlock):
-                    function_calls.append({
-                        "id": block.id,
-                        "name": block.name,
-                        "arguments": block.input
-                    })
 
             formatted_response = None
             if content:
@@ -411,7 +414,11 @@ class llm_wrapper:
     async def call_ollama_api(self, messages=None, system_prompt=SYSTEM_PROMPT, tools=None, model=None):
         # Convert messages to Ollama format
         ollama_messages = []
-        for message in messages:
+
+        if system_prompt:
+            ollama_messages.append({"role": "system", "content": system_prompt})
+
+        for message in messages or []:
             if message["type"] == "user_query":
                 ollama_messages.append({"role": "user", "content": message["content"]})
             elif message["type"] == "llm_response":
@@ -445,4 +452,3 @@ class llm_wrapper:
                 "formatted_response": None,
                 "error": str(e)
             }
-
